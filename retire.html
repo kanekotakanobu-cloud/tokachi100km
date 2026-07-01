@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>リタイヤ申告</title>
+<style>
+  :root{
+    --bg:#EEF2EE; --surface:#FFFFFF; --ink:#16241E; --muted:#5C6B64;
+    --primary:#1F6F5C; --primary-press:#16543F; --border:#D6E0D9;
+    --emergency:#C0392B; --emergency-press:#9B2D21; --ok:#1F6F5C;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+    line-height:1.6; -webkit-text-size-adjust:100%;
+    padding:env(safe-area-inset-top) 16px calc(env(safe-area-inset-bottom) + 24px);
+  }
+  .wrap{max-width:460px; margin:0 auto;}
+  h1{font-size:30px; font-weight:800; letter-spacing:.02em; margin:24px 0 4px;}
+  .lead{color:var(--muted); margin:0 0 20px; font-size:15px;}
+
+  /* 緊急バナー（赤は緊急専用） */
+  .emergency{
+    background:#FCEDEB; border:2px solid var(--emergency);
+    border-radius:14px; padding:16px; margin:0 0 22px;
+  }
+  .emergency p{margin:0 0 12px; font-weight:700; color:var(--emergency); font-size:15px;}
+  .btn{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    width:100%; min-height:60px; border:none; border-radius:14px;
+    font-size:20px; font-weight:800; cursor:pointer; text-decoration:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .btn-emergency{background:var(--emergency); color:#fff;}
+  .btn-emergency:active{background:var(--emergency-press);}
+
+  .card{
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:16px; padding:20px; margin:0 0 18px;
+  }
+  label{display:block; font-weight:700; font-size:16px; margin:0 0 8px;}
+  input[type="text"]{
+    width:100%; height:64px; border:2px solid var(--border); border-radius:12px;
+    font-size:26px; font-weight:700; text-align:center; color:var(--ink);
+    background:#fff;
+  }
+  input[type="text"]:focus{outline:none; border-color:var(--primary);}
+  .btn-primary{background:var(--primary); color:#fff; margin-top:16px;}
+  .btn-primary:active{background:var(--primary-press);}
+  .btn-primary:disabled{background:#9DB3AB;}
+  .btn-ghost{
+    background:#fff; color:var(--primary); border:2px solid var(--primary);
+    margin-top:12px;
+  }
+
+  .status{margin:14px 0 0; font-size:15px; color:var(--muted); min-height:1.6em;}
+  .hidden{display:none;}
+
+  /* 完了画面 */
+  .done{ text-align:center; padding:8px 4px 4px; }
+  .done .mark{
+    width:72px; height:72px; border-radius:50%; background:var(--ok);
+    color:#fff; font-size:42px; line-height:72px; margin:8px auto 16px;
+  }
+  .done h2{font-size:24px; margin:0 0 8px;}
+  .done p{color:var(--muted); margin:0 0 16px; font-size:15px;}
+  .coords{
+    background:#F3F6F4; border:1px solid var(--border); border-radius:12px;
+    padding:14px; font-size:14px; color:var(--ink); word-break:break-all;
+  }
+  .coords b{display:block; font-size:13px; color:var(--muted); margin-bottom:4px; font-weight:700;}
+  .warn{color:var(--emergency); font-weight:700;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>リタイヤ申告</h1>
+  <p class="lead">コースを離脱するときは、ここから運営に知らせてください。</p>
+
+  <!-- 緊急時：操作させず即電話 -->
+  <div class="emergency">
+    <p>ケガ・体調不良など緊急のときは、この操作をせず、いますぐ電話してください。</p>
+    <!-- ↓ tel: の番号を運営の緊急連絡先に置き換える -->
+    <a class="btn btn-emergency" href="tel:08032306891">運営に電話する</a>
+  </div>
+
+  <!-- 申告フォーム -->
+  <div id="form" class="card">
+    <label for="bib">ゼッケン番号</label>
+    <input id="bib" type="text" inputmode="numeric" autocomplete="off" placeholder="例 123">
+    <button id="go" class="btn btn-primary">現在地を取得して申告する</button>
+    <button id="goNoLoc" class="btn btn-ghost hidden">位置情報なしで申告する</button>
+    <p id="status" class="status"></p>
+  </div>
+
+  <!-- 完了画面 -->
+  <div id="done" class="card done hidden">
+    <div class="mark">✓</div>
+    <h2>申告を受け付けました</h2>
+    <p id="doneMsg">運営があなたのリタイヤを確認します。安全に移動してください。</p>
+    <div id="doneCoords" class="coords hidden"></div>
+  </div>
+
+</div>
+
+<script>
+  // ===== ここだけ書き換える =====================================
+  // GASをウェブアプリとして公開したときに出るURL（/exec で終わるもの）
+  var GAS_URL = "https://script.google.com/macros/s/AKfycbyDqKNpjm6B_k1wZkTF3zXJUF0TkWpSIq-J0-nsVzGR9-CSI9w8k5PxWfWqLPONepqB/exec";
+  // ============================================================
+
+  var bibEl    = document.getElementById('bib');
+  var goBtn    = document.getElementById('go');
+  var noLocBtn = document.getElementById('goNoLoc');
+  var statusEl = document.getElementById('status');
+  var formEl   = document.getElementById('form');
+  var doneEl   = document.getElementById('done');
+  var doneMsg  = document.getElementById('doneMsg');
+  var doneCoords = document.getElementById('doneCoords');
+
+  function setStatus(msg){ statusEl.textContent = msg || ''; }
+
+  goBtn.addEventListener('click', function(){
+    var bib = bibEl.value.trim();
+    if(!bib){ setStatus('ゼッケン番号を入力してください。'); bibEl.focus(); return; }
+    goBtn.disabled = true;
+    setStatus('現在地を取得しています…（位置情報の許可を「許可」にしてください）');
+
+    if(!navigator.geolocation){
+      offerNoLocation('この端末では位置情報が使えません。');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      function(pos){
+        var c = pos.coords;
+        setStatus('現在地を取得しました（誤差 約 ±' + Math.round(c.accuracy) + ' m）。送信します…');
+        send(bib, c.latitude, c.longitude, Math.round(c.accuracy));
+      },
+      function(err){
+        offerNoLocation('位置情報を取得できませんでした（' + err.message + '）。');
+      },
+      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+    );
+  });
+
+  function offerNoLocation(reason){
+    goBtn.disabled = false;
+    setStatus(reason + ' できれば位置情報を「許可」にして再度お試しください。位置情報なしでも申告できます（スタッフが巡回しています）。');
+    noLocBtn.classList.remove('hidden');
+  }
+
+  noLocBtn.addEventListener('click', function(){
+    var bib = bibEl.value.trim();
+    if(!bib){ setStatus('ゼッケン番号を入力してください。'); bibEl.focus(); return; }
+    noLocBtn.disabled = true;
+    setStatus('送信します…');
+    send(bib, '', '', '');
+  });
+
+  var pending = null;     // 送信待ちのデータ
+  var retryTimer = null;
+
+  function send(bib, lat, lng, acc){
+    var payload = { bib:bib, lat:lat, lng:lng, accuracy:acc };
+    if(navigator.onLine === false){
+      queue(payload);            // 圏外：座標は確保済み。あとで送る。
+      return;
+    }
+    post(payload)
+      .then(function(){ showDone(payload); })
+      .catch(function(){ queue(payload); });   // 送信失敗も待ち行きに
+  }
+
+  // GASへ1回送信する（no-cors。成功で解決・通信失敗で拒否）
+  function post(payload){
+    return fetch(GAS_URL, {
+      method:'POST',
+      mode:'no-cors',
+      headers:{ 'Content-Type':'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+  }
+
+  // 送信待ちに入れて、電波回復を待って自動再送する
+  function queue(payload){
+    pending = payload;
+    showPending(payload);
+    window.addEventListener('online', tryFlush);   // 電波が戻ったら送る
+    if(!retryTimer){
+      retryTimer = setInterval(tryFlush, 15000);   // onlineが来ない端末の保険
+    }
+  }
+
+  function tryFlush(){
+    if(!pending || navigator.onLine === false) return;
+    var data = pending;
+    post(data)
+      .then(function(){ clearQueue(); showDone(data); })
+      .catch(function(){ /* まだ届かない。次の機会に再送 */ });
+  }
+
+  function clearQueue(){
+    pending = null;
+    if(retryTimer){ clearInterval(retryTimer); retryTimer = null; }
+    window.removeEventListener('online', tryFlush);
+  }
+
+  function coordsHtml(label, p){
+    if(p.lat === '' || p.lat == null) return '';
+    return '<b>' + label + '</b>緯度 ' + p.lat + '<br>経度 ' + p.lng
+      + (p.accuracy !== '' ? '<br>誤差 約 ±' + p.accuracy + ' m' : '');
+  }
+
+  // 送信完了
+  function showDone(p){
+    clearQueue();
+    formEl.classList.add('hidden');
+    doneEl.classList.remove('hidden');
+    var mark = doneEl.querySelector('.mark');
+    mark.textContent = '✓';
+    mark.style.background = '';
+    doneEl.querySelector('h2').textContent = '申告を受け付けました';
+    doneMsg.innerHTML = '運営があなたのリタイヤを確認しました。安全に移動してください。';
+    var ch = coordsHtml('送信した現在地', p);
+    if(ch){ doneCoords.classList.remove('hidden'); doneCoords.innerHTML = ch; }
+    else  { doneCoords.classList.add('hidden'); }
+    window.scrollTo(0,0);
+  }
+
+  // 圏外：座標は確保済み。画面を開いたままなら電波回復時に自動送信する。
+  function showPending(p){
+    formEl.classList.add('hidden');
+    doneEl.classList.remove('hidden');
+    var mark = doneEl.querySelector('.mark');
+    mark.textContent = '…';
+    mark.style.background = '#C08A1E';   // 待機を表す琥珀色
+    doneEl.querySelector('h2').textContent = '送信待ち（圏外）';
+    var hasLoc = (p.lat !== '' && p.lat != null);
+    doneMsg.innerHTML =
+      (hasLoc ? '位置情報を記録しました。' : '申告内容を記録しました。')
+      + '<b>この画面を開いたままにしてください。</b>'
+      + '電波が届いた時点で、自動で運営に送信します。';
+    var ch = coordsHtml('記録した現在地', p);
+    if(ch){ doneCoords.classList.remove('hidden'); doneCoords.innerHTML = ch; }
+    else  { doneCoords.classList.add('hidden'); }
+    window.scrollTo(0,0);
+  }
+</script>
+</body>
+</html>
